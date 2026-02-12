@@ -672,7 +672,7 @@ const paths: Record<string, any> = {
       tags: ['Events'],
       summary: 'WebSocket event stream',
       description:
-        'Upgrade to WebSocket on this path to receive all realtime Baileys events. Use `?sessionId=<id>` to filter by session and `?apiKey=<API_KEY>` (or header `x-api-key`) when API key auth is enabled.',
+        'Upgrade to WebSocket on this path to receive all realtime Baileys events. Use `?sessionId=<id>` to filter by session and `?apiKey=<API_KEY>` (or header `x-api-key`) when API key auth is enabled. This endpoint is available only when `ENABLE_WEBSOCKET=true`.',
       parameters: [
         {
           name: 'sessionId',
@@ -736,7 +736,8 @@ export const openApiSpec = {
       post: {
         tags: ['Events'],
         summary: 'Outbound webhook payload sent by this server',
-        description: 'This is the payload shape delivered to `BASE_WEBHOOK_URL` for each enabled event.',
+        description:
+          'This is the payload shape delivered to `BASE_WEBHOOK_URL` for each enabled event. Delivery occurs only when `ENABLE_WEBHOOK=true`.',
         requestBody: {
           required: true,
           content: {

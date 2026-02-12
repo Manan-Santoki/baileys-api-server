@@ -7,11 +7,13 @@ import type { WebhookPayload } from '../types';
 class WebhookService {
   private baseUrl: string;
   private apiKey: string;
+  private enabled: boolean;
   private disabledCallbacks: Set<string>;
 
   constructor() {
     this.baseUrl = config.baseWebhookUrl;
     this.apiKey = config.apiKey;
+    this.enabled = config.enableWebhook;
     this.disabledCallbacks = new Set(config.disabledCallbacks);
   }
 
@@ -33,6 +35,11 @@ class WebhookService {
 
     // Push to websocket listeners regardless of webhook configuration.
     webSocketService.broadcast(sessionId, dataType, data);
+
+    if (!this.enabled) {
+      logger.debug({ sessionId, dataType }, 'Webhook delivery disabled (ENABLE_WEBHOOK=false)');
+      return;
+    }
 
     if (!this.baseUrl) {
       logger.debug({ sessionId, dataType }, 'No webhook URL configured, skipping HTTP webhook');

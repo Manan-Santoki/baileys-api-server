@@ -11,6 +11,8 @@ async function main() {
     port: config.port,
     sessionsPath: config.sessionsPath,
     autoStartSessions: config.autoStartSessions,
+    webSocketEnabled: config.enableWebSocket,
+    webhookEnabled: config.enableWebhook,
     webhookUrl: config.baseWebhookUrl || '(not configured)',
   }, 'Configuration');
 
@@ -19,13 +21,19 @@ async function main() {
     await sessionManager.autoStartSessions();
   }
 
-  // Start HTTP server + websocket server
+  // Start HTTP server (+ websocket server if enabled)
   const server = createServer(app);
-  webSocketService.initialize(server);
+  if (config.enableWebSocket) {
+    webSocketService.initialize(server);
+  }
 
   server.listen(config.port, () => {
     logger.info(`Server running on http://localhost:${config.port}`);
-    logger.info(`WebSocket endpoint ws://localhost:${config.port}/ws`);
+    if (config.enableWebSocket) {
+      logger.info(`WebSocket endpoint ws://localhost:${config.port}/ws`);
+    } else {
+      logger.info('WebSocket endpoint disabled (ENABLE_WEBSOCKET=false)');
+    }
     logger.info('Available endpoints:');
     logger.info('  GET  /ping - Health check');
     logger.info('  GET  /session/start/:sessionId - Start session');
