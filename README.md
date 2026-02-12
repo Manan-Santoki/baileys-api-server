@@ -9,6 +9,7 @@ A lightweight WhatsApp API server using [Baileys](https://github.com/WhiskeySock
 - QR code and pairing code authentication
 - Webhook delivery for events
 - WebSocket event stream at `/ws` (session-filterable)
+- Legacy compatibility router at `/legacy/*` for wwebjs endpoint migration
 - Multi-session support
 - Auto-reconnection with exponential backoff
 - OpenAPI + Swagger docs at `/openapi.json` and `/docs`
@@ -27,6 +28,7 @@ Copy `.env.example` to `.env` and configure:
 ```env
 PORT=3000
 API_KEY=your_api_key_here
+ENABLE_LEGACY_ROUTER=true
 ENABLE_WEBSOCKET=true
 ENABLE_WEBHOOK=true
 BASE_WEBHOOK_URL=http://localhost:3001/api/ai-agents/webhook
@@ -148,6 +150,21 @@ Interactive docs:
 - `POST /message/edit/:sessionId` - Edit message
 - `POST /message/pin/:sessionId` - Pin message
 - `POST /message/unpin/:sessionId` - Unpin message
+
+## Legacy Router (wwebjs Compatibility)
+
+- Set `ENABLE_LEGACY_ROUTER=true` to enable legacy compatibility endpoints.
+- Legacy endpoints are exposed under `/legacy/*`.
+- This means you can call old wwebjs-style endpoints by changing base path to `/legacy`.
+  Example:
+  - Old: `POST /client/sendMessage/:sessionId`
+  - Legacy compat: `POST /legacy/client/sendMessage/:sessionId`
+
+Compatibility behavior:
+- All endpoints from the old wwebjs Swagger are registered in the legacy router.
+- Endpoints that can be bridged are forwarded to current implementations (including method/path/body adapters).
+- Endpoints not implemented in the current Baileys server return `501 legacy_endpoint_not_implemented` instead of `404`.
+- Legacy routes are intentionally not included in `/openapi.json` to keep primary docs focused on current API.
 
 ## Sending Messages Guide
 

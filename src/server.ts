@@ -4,6 +4,7 @@ import config from './config';
 import logger from './logger';
 import sessionManager from './services/SessionManager';
 import webSocketService from './services/WebSocketService';
+import { LEGACY_SWAGGER_OPERATIONS } from './routes/legacySwaggerOperations';
 
 async function main() {
   logger.info('Starting Baileys API Server...');
@@ -11,6 +12,7 @@ async function main() {
     port: config.port,
     sessionsPath: config.sessionsPath,
     autoStartSessions: config.autoStartSessions,
+    legacyRouterEnabled: config.enableLegacyRouter,
     webSocketEnabled: config.enableWebSocket,
     webhookEnabled: config.enableWebhook,
     webhookUrl: config.baseWebhookUrl || '(not configured)',
@@ -40,6 +42,11 @@ async function main() {
     logger.info('  GET  /session/status/:sessionId - Get session status');
     logger.info('  GET  /session/qr/:sessionId - Get QR code');
     logger.info('  POST /client/sendMessage/:sessionId - Send message');
+    if (config.enableLegacyRouter) {
+      logger.info(`  Legacy compatibility routes enabled at /legacy/* (${LEGACY_SWAGGER_OPERATIONS.length} endpoints)`);
+    } else {
+      logger.info('  Legacy compatibility routes disabled (ENABLE_LEGACY_ROUTER=false)');
+    }
     logger.info('  ... and more. See routes/index.ts for full list');
   });
 }

@@ -1,5 +1,7 @@
 import express from 'express';
 import routes from './routes';
+import legacyRoutes from './routes/legacy';
+import config from './config';
 import authMiddleware from './middleware/authMiddleware';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import logger from './logger';
@@ -54,6 +56,10 @@ app.get('/docs', (_req, res) => {
 
 // API key authentication
 app.use(authMiddleware);
+
+if (config.enableLegacyRouter) {
+  app.use('/legacy', legacyRoutes);
+}
 
 // Routes
 app.use('/', routes);

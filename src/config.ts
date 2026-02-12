@@ -22,6 +22,7 @@ function parseBooleanEnv(value: string | undefined, defaultValue: boolean): bool
 export const config = {
   port: parseInt(process.env.PORT || '3000', 10),
   apiKey: process.env.API_KEY || '',
+  enableLegacyRouter: parseBooleanEnv(process.env.ENABLE_LEGACY_ROUTER, true),
   enableWebSocket: parseBooleanEnv(process.env.ENABLE_WEBSOCKET, true),
   enableWebhook: parseBooleanEnv(process.env.ENABLE_WEBHOOK, true),
   baseWebhookUrl: process.env.BASE_WEBHOOK_URL || '',
