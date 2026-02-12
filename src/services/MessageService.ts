@@ -1,12 +1,11 @@
-import { proto, downloadMediaMessage, getContentType } from '@whiskeysockets/baileys';
+import { proto, downloadMediaMessage, getContentType, WAMessageKey } from '@whiskeysockets/baileys';
 import axios from 'axios';
-import fs from 'fs';
 import path from 'path';
 import { getLinkPreview } from 'link-preview-js';
 
 import sessionManager from './SessionManager';
 import logger from '../logger';
-import { toBaileysJid, toWwebjsJid, createMessageId, createSerializedId } from '../utils/jidHelper';
+import { toBaileysJid } from '../utils/jidHelper';
 import type {
   SendMessageOptions,
   MediaContent,
@@ -34,15 +33,15 @@ class MessageService {
     try {
       switch (options.contentType) {
         case 'string':
-          result = await this.sendTextMessage(session.socket, jid, options.content as string, options.options);
+          result = await this.sendTextMessage(sessionId, jid, options.content as string, options.options);
           break;
 
         case 'MessageMedia':
-          result = await this.sendMediaMessage(session.socket, jid, options.content as MediaContent, options.options);
+          result = await this.sendMediaMessage(sessionId, jid, options.content as MediaContent, options.options);
           break;
 
         case 'MessageMediaFromURL':
-          result = await this.sendMediaFromUrl(session.socket, jid, options.content as string, options.options);
+          result = await this.sendMediaFromUrl(sessionId, jid, options.content as string, options.options);
           break;
 
         case 'Location':
@@ -70,7 +69,7 @@ class MessageService {
       }
 
       if (result) {
-        return sessionManager.formatMessage(result);
+        return sessionManager.formatMessage(result, sessionId);
       }
 
       return null;
@@ -84,26 +83,31 @@ class MessageService {
    * Send text message
    */
   private async sendTextMessage(
-    socket: any,
+    sessionId: string,
     jid: string,
     text: string,
     options?: SendMessageOptions['options']
   ): Promise<proto.WebMessageInfo | undefined> {
-    const messageOptions: any = {
+    const session = sessionManager.getSession(sessionId);
+    if (!session || session.status !== 'connected') {
+      throw new Error('Session not connected');
+    }
+
+    const messageOptions: Record<string, unknown> = {
       text,
     };
 
-    // Handle quoted message
     if (options?.quotedMessageId) {
-      messageOptions.quoted = await this.getQuotedMessage(socket, jid, options.quotedMessageId);
+      const quoted = await this.getQuotedMessage(sessionId, jid, options.quotedMessageId);
+      if (quoted) {
+        messageOptions.quoted = quoted;
+      }
     }
 
-    // Handle mentions
     if (options?.mentions?.length) {
       messageOptions.mentions = options.mentions.map(toBaileysJid);
     }
 
-    // Handle link preview
     if (options?.linkPreview !== false) {
       try {
         const urlMatch = text.match(/(https?:\/\/[^\s]+)/);
@@ -123,83 +127,89 @@ class MessageService {
           }
         }
       } catch (error) {
-        // Link preview failed, continue without it
         logger.debug({ error }, 'Link preview failed');
       }
     }
 
-    return socket.sendMessage(jid, messageOptions);
+    return session.socket.sendMessage(jid, messageOptions as any);
   }
 
   /**
    * Send media message (image, video, audio, document)
    */
   private async sendMediaMessage(
-    socket: any,
+    sessionId: string,
     jid: string,
     media: MediaContent,
     options?: SendMessageOptions['options']
   ): Promise<proto.WebMessageInfo | undefined> {
+    const session = sessionManager.getSession(sessionId);
+    if (!session || session.status !== 'connected') {
+      throw new Error('Session not connected');
+    }
+
     const buffer = Buffer.from(media.data, 'base64');
     const mimetype = media.mimetype;
 
-    const messageOptions: any = {};
+    const messageOptions: Record<string, unknown> = {};
 
-    // Handle quoted message
     if (options?.quotedMessageId) {
-      messageOptions.quoted = await this.getQuotedMessage(socket, jid, options.quotedMessageId);
+      const quoted = await this.getQuotedMessage(sessionId, jid, options.quotedMessageId);
+      if (quoted) {
+        messageOptions.quoted = quoted;
+      }
     }
 
-    // Handle mentions
     if (options?.mentions?.length) {
       messageOptions.mentions = options.mentions.map(toBaileysJid);
     }
 
-    // Determine message type based on mimetype
     if (mimetype.startsWith('image/')) {
-      return socket.sendMessage(jid, {
+      return session.socket.sendMessage(jid, {
         image: buffer,
         caption: options?.caption || media.filename || '',
         mimetype,
         ...messageOptions,
       });
-    } else if (mimetype.startsWith('video/')) {
-      return socket.sendMessage(jid, {
+    }
+
+    if (mimetype.startsWith('video/')) {
+      return session.socket.sendMessage(jid, {
         video: buffer,
         caption: options?.caption || media.filename || '',
         mimetype,
         gifPlayback: options?.sendVideoAsGif || false,
         ...messageOptions,
       });
-    } else if (mimetype.startsWith('audio/')) {
-      return socket.sendMessage(jid, {
+    }
+
+    if (mimetype.startsWith('audio/')) {
+      return session.socket.sendMessage(jid, {
         audio: buffer,
         mimetype,
         ptt: options?.sendAudioAsVoice || false,
         ...messageOptions,
       });
-    } else {
-      // Document
-      return socket.sendMessage(jid, {
-        document: buffer,
-        fileName: media.filename || 'file',
-        mimetype,
-        ...messageOptions,
-      });
     }
+
+    return session.socket.sendMessage(jid, {
+      document: buffer,
+      fileName: media.filename || 'file',
+      mimetype,
+      ...messageOptions,
+    });
   }
 
   /**
    * Send media from URL
    */
   private async sendMediaFromUrl(
-    socket: any,
+    sessionId: string,
     jid: string,
     url: string,
     options?: SendMessageOptions['options']
   ): Promise<proto.WebMessageInfo | undefined> {
     try {
-      // Download the file
       const response = await axios.get(url, {
         responseType: 'arraybuffer',
         timeout: 60000,
@@ -208,7 +218,6 @@ class MessageService {
       const buffer = Buffer.from(response.data);
       const contentType = response.headers['content-type'] || 'application/octet-stream';
 
-      // Extract filename from URL or content-disposition
       let filename = 'file';
       const urlPath = new URL(url).pathname;
       const urlFilename = path.basename(urlPath);
@@ -222,7 +231,7 @@ class MessageService {
         filename,
       };
 
-      return this.sendMediaMessage(socket, jid, media, options);
+      return this.sendMediaMessage(sessionId, jid, media, options);
     } catch (error) {
       logger.error({ url, error }, 'Error downloading media from URL');
       throw error;
@@ -274,12 +283,7 @@ class MessageService {
     const contactJid = toBaileysJid(contact.contactId);
     const phoneNumber = contactJid.split('@')[0];
 
-    // Create vCard
-    const vcard = `BEGIN:VCARD
-VERSION:3.0
-FN:${phoneNumber}
-TEL;type=CELL;type=VOICE;waid=${phoneNumber}:+${phoneNumber}
-END:VCARD`;
+    const vcard = `BEGIN:VCARD\nVERSION:3.0\nFN:${phoneNumber}\nTEL;type=CELL;type=VOICE;waid=${phoneNumber}:+${phoneNumber}\nEND:VCARD`;
 
     return socket.sendMessage(jid, {
       contacts: {
@@ -290,50 +294,49 @@ END:VCARD`;
   }
 
   /**
-   * Send buttons message (deprecated in WhatsApp - may not work)
+   * Send buttons message (deprecated in WhatsApp - fallback to plain text)
    */
   private async sendButtonsMessage(
     socket: any,
     jid: string,
     buttons: ButtonsContent
   ): Promise<proto.WebMessageInfo | undefined> {
-    // Note: Interactive buttons are largely deprecated by WhatsApp
-    // This may not work for most accounts
-    logger.warn('Button messages are deprecated and may not work');
+    logger.warn('Button messages are deprecated and may not work in all clients');
 
     return socket.sendMessage(jid, {
-      text: `${buttons.title ? buttons.title + '\n\n' : ''}${buttons.body}${buttons.footer ? '\n\n' + buttons.footer : ''}`,
+      text: `${buttons.title ? `${buttons.title}\n\n` : ''}${buttons.body}${buttons.footer ? `\n\n${buttons.footer}` : ''}`,
     });
   }
 
   /**
-   * Send list message (deprecated in WhatsApp - may not work)
+   * Send list message (deprecated in WhatsApp - fallback to plain text)
    */
   private async sendListMessage(
     socket: any,
     jid: string,
     list: ListContent
   ): Promise<proto.WebMessageInfo | undefined> {
-    // Note: List messages are largely deprecated by WhatsApp
-    // This may not work for most accounts
-    logger.warn('List messages are deprecated and may not work');
+    logger.warn('List messages are deprecated and may not work in all clients');
 
     return socket.sendMessage(jid, {
-      text: `${list.title ? list.title + '\n\n' : ''}${list.body}${list.footer ? '\n\n' + list.footer : ''}`,
+      text: `${list.title ? `${list.title}\n\n` : ''}${list.body}${list.footer ? `\n\n${list.footer}` : ''}`,
     });
   }
 
   /**
    * Get message for quoting
    */
-  private async getQuotedMessage(socket: any, jid: string, messageId: string): Promise<proto.IWebMessageInfo | undefined> {
-    // Note: Baileys requires the actual message object for quoting
-    // This is a limitation - we'd need to store messages to support this properly
-    return undefined;
+  private async getQuotedMessage(
+    sessionId: string,
+    chatJid: string,
+    messageId: string
+  ): Promise<proto.IWebMessageInfo | undefined> {
+    const message = await sessionManager.getMessageById(sessionId, chatJid, messageId);
+    return message || undefined;
   }
 
   /**
-   * Fetch messages from a chat
+   * Fetch messages from a chat (from local session store)
    */
   async fetchMessages(
     sessionId: string,
@@ -345,16 +348,27 @@ END:VCARD`;
       throw new Error('Session not connected');
     }
 
-    const jid = toBaileysJid(chatId);
-    const limit = options.limit || 50;
+    const limit = Math.max(1, Math.min(Number(options.limit || 50), 500));
 
     try {
-      // Note: Baileys doesn't support fetching old messages like wwebjs
-      // It only receives new messages after connection
-      // This is a known limitation
-      logger.warn({ sessionId, chatId }, 'fetchMessages: Baileys has limited history support');
+      const allMessages = sessionManager.getMessagesForChat(sessionId, chatId);
 
-      return [];
+      let startIndex = 0;
+      if (options.before) {
+        try {
+          const beforeKey = await sessionManager.resolveMessageKey(sessionId, chatId, options.before);
+          const idx = allMessages.findIndex((message) => message.key?.id === beforeKey.id);
+          if (idx >= 0) {
+            startIndex = idx + 1;
+          }
+        } catch {
+          startIndex = 0;
+        }
+      }
+
+      return allMessages
+        .slice(startIndex, startIndex + limit)
+        .map((message) => sessionManager.formatMessage(message, sessionId));
     } catch (error) {
       logger.error({ sessionId, chatId, error }, 'Error fetching messages');
       throw error;
@@ -375,17 +389,13 @@ END:VCARD`;
       throw new Error('Session not connected');
     }
 
-    const jid = toBaileysJid(chatId);
+    const messageKey = await this.resolveMessageKeyWithRemote(sessionId, chatId, messageId);
 
     try {
-      await session.socket.sendMessage(jid, {
+      await session.socket.sendMessage(messageKey.remoteJid!, {
         react: {
           text: emoji,
-          key: {
-            remoteJid: jid,
-            id: messageId,
-            fromMe: false, // We don't know this without storing messages
-          },
+          key: messageKey,
         },
       });
     } catch (error) {
@@ -408,8 +418,17 @@ END:VCARD`;
       throw new Error('Session not connected');
     }
 
-    // Note: Baileys doesn't have direct support for starring messages
-    logger.warn({ sessionId, chatId, messageId }, 'Star message not supported in Baileys');
+    const messageKey = await this.resolveMessageKeyWithRemote(sessionId, chatId, messageId);
+
+    if (!messageKey.id) {
+      throw new Error('Invalid message key');
+    }
+
+    await session.socket.star(
+      messageKey.remoteJid!,
+      [{ id: messageKey.id, fromMe: typeof messageKey.fromMe === 'boolean' ? messageKey.fromMe : undefined }],
+      star
+    );
   }
 
   /**
@@ -426,22 +445,23 @@ END:VCARD`;
       throw new Error('Session not connected');
     }
 
-    const jid = toBaileysJid(chatId);
+    const messageKey = await this.resolveMessageKeyWithRemote(sessionId, chatId, messageId);
 
     try {
       if (forEveryone) {
-        await session.socket.sendMessage(jid, {
-          delete: {
-            remoteJid: jid,
-            id: messageId,
-            fromMe: true,
-          },
+        await session.socket.sendMessage(messageKey.remoteJid!, {
+          delete: messageKey,
         });
       } else {
-        // Delete for me - use chat modify
         await session.socket.chatModify(
-          { clear: { messages: [{ id: messageId, fromMe: true, timestamp: Date.now() }] } },
-          jid
+          {
+            deleteForMe: {
+              key: messageKey,
+              timestamp: Date.now(),
+              deleteMedia: false,
+            },
+          },
+          messageKey.remoteJid!
         );
       }
     } catch (error) {
@@ -464,14 +484,32 @@ END:VCARD`;
       throw new Error('Session not connected');
     }
 
-    // Note: Baileys requires the actual message object for forwarding
-    // This is a limitation without message storage
-    logger.warn({ sessionId, chatId, messageId }, 'Forward message requires message storage');
-    throw new Error('Forward message not supported without message storage');
+    const sourceMessage = await sessionManager.getMessageById(sessionId, chatId, messageId);
+    if (!sourceMessage) {
+      throw new Error('Source message not found in local store');
+    }
+
+    const targetJid = toBaileysJid(targetChatId);
+
+    try {
+      const forwarded = await session.socket.sendMessage(targetJid, {
+        forward: sourceMessage,
+        force: false,
+      });
+
+      if (!forwarded) {
+        return null;
+      }
+
+      return sessionManager.formatMessage(forwarded, sessionId);
+    } catch (error) {
+      logger.error({ sessionId, chatId, messageId, targetChatId, error }, 'Error forwarding message');
+      throw error;
+    }
   }
 
   /**
-   * Download media from a message
+   * Download media from a message object
    */
   async downloadMedia(
     sessionId: string,
@@ -493,9 +531,17 @@ END:VCARD`;
         }
       );
 
-      const message = messageData.message!;
-      const type = getContentType(message)!;
-      const mediaMessage = message[type as keyof typeof message] as any;
+      const message = messageData.message;
+      if (!message) {
+        throw new Error('Message payload is missing');
+      }
+
+      const type = getContentType(message);
+      if (!type) {
+        throw new Error('Message does not contain downloadable media');
+      }
+
+      const mediaMessage = message[type as keyof typeof message] as { mimetype?: string; fileName?: string } | undefined;
 
       return {
         data: buffer.toString('base64'),
@@ -506,6 +552,22 @@ END:VCARD`;
       logger.error({ sessionId, error }, 'Error downloading media');
       throw error;
     }
+  }
+
+  /**
+   * Download media from chat + message ID
+   */
+  async downloadMediaById(
+    sessionId: string,
+    chatId: string,
+    messageId: string
+  ): Promise<{ data: string; mimetype: string; filename?: string } | null> {
+    const message = await sessionManager.getMessageById(sessionId, chatId, messageId);
+    if (!message) {
+      throw new Error('Message not found in local store');
+    }
+
+    return this.downloadMedia(sessionId, message);
   }
 
   /**
@@ -555,10 +617,13 @@ END:VCARD`;
       throw new Error('Session not connected');
     }
 
-    const jid = toBaileysJid(chatId);
+    const lastMessages = this.getLastMessageKeys(sessionId, chatId, 1);
+    if (lastMessages.length === 0) {
+      return;
+    }
 
     try {
-      await session.socket.readMessages([{ remoteJid: jid, id: 'latest' }]);
+      await session.socket.readMessages(lastMessages);
     } catch (error) {
       logger.error({ sessionId, chatId, error }, 'Error marking chat as read');
       throw error;
@@ -575,9 +640,10 @@ END:VCARD`;
     }
 
     const jid = toBaileysJid(chatId);
+    const lastMessages = this.getChatModifyLastMessages(sessionId, chatId, 1);
 
     try {
-      await session.socket.chatModify({ markRead: false }, jid);
+      await session.socket.chatModify({ markRead: false, lastMessages }, jid);
     } catch (error) {
       logger.error({ sessionId, chatId, error }, 'Error marking chat as unread');
       throw error;
@@ -594,9 +660,10 @@ END:VCARD`;
     }
 
     const jid = toBaileysJid(chatId);
+    const lastMessages = this.getChatModifyLastMessages(sessionId, chatId, 1);
 
     try {
-      await session.socket.chatModify({ archive: true }, jid);
+      await session.socket.chatModify({ archive: true, lastMessages }, jid);
     } catch (error) {
       logger.error({ sessionId, chatId, error }, 'Error archiving chat');
       throw error;
@@ -613,9 +680,10 @@ END:VCARD`;
     }
 
     const jid = toBaileysJid(chatId);
+    const lastMessages = this.getChatModifyLastMessages(sessionId, chatId, 1);
 
     try {
-      await session.socket.chatModify({ archive: false }, jid);
+      await session.socket.chatModify({ archive: false, lastMessages }, jid);
     } catch (error) {
       logger.error({ sessionId, chatId, error }, 'Error unarchiving chat');
       throw error;
@@ -710,7 +778,7 @@ END:VCARD`;
     const jid = toBaileysJid(chatId);
 
     try {
-      await session.socket.chatModify({ delete: true }, jid);
+      await session.socket.chatModify({ clear: true }, jid);
     } catch (error) {
       logger.error({ sessionId, chatId, error }, 'Error clearing chat');
       throw error;
@@ -727,13 +795,79 @@ END:VCARD`;
     }
 
     const jid = toBaileysJid(chatId);
+    const lastMessages = this.getChatModifyLastMessages(sessionId, chatId, 1);
 
     try {
-      await session.socket.chatModify({ delete: true }, jid);
+      await session.socket.chatModify({ delete: true, lastMessages }, jid);
     } catch (error) {
       logger.error({ sessionId, chatId, error }, 'Error deleting chat');
       throw error;
     }
+  }
+
+  private getChatModifyLastMessages(
+    sessionId: string,
+    chatId: string,
+    count: number
+  ): Array<{ key: WAMessageKey; messageTimestamp: number }> {
+    const messages = sessionManager.getLastMessages(sessionId, chatId, count);
+
+    const payload = messages
+      .filter((message) => !!message.key?.id)
+      .map((message) => ({
+        key: message.key as WAMessageKey,
+        messageTimestamp: this.toTimestamp(message.messageTimestamp),
+      }));
+
+    if (payload.length === 0) {
+      throw new Error('No local messages found in this chat. Receive at least one message before modifying chat state.');
+    }
+
+    return payload;
+  }
+
+  private getLastMessageKeys(sessionId: string, chatId: string, count: number): WAMessageKey[] {
+    return sessionManager
+      .getLastMessages(sessionId, chatId, count)
+      .map((message) => message.key)
+      .filter((key): key is WAMessageKey => !!key?.id && !!key.remoteJid);
+  }
+
+  private async resolveMessageKeyWithRemote(
+    sessionId: string,
+    chatId: string,
+    messageId: string
+  ): Promise<WAMessageKey> {
+    const key = await sessionManager.resolveMessageKey(sessionId, chatId, messageId);
+    const remoteJid = key.remoteJid || toBaileysJid(chatId);
+    return {
+      ...key,
+      remoteJid,
+    };
+  }
+
+  private toTimestamp(value: unknown): number {
+    if (typeof value === 'number') {
+      return value;
+    }
+
+    if (typeof value === 'bigint') {
+      return Number(value);
+    }
+
+    if (!value || typeof value !== 'object') {
+      return Math.floor(Date.now() / 1000);
+    }
+
+    if ('toNumber' in value && typeof (value as { toNumber: () => number }).toNumber === 'function') {
+      return (value as { toNumber: () => number }).toNumber();
+    }
+
+    if ('low' in value && typeof (value as { low: number }).low === 'number') {
+      return (value as { low: number }).low;
+    }
+
+    return Math.floor(Date.now() / 1000);
   }
 }
 

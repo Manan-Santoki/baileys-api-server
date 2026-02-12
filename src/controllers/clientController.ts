@@ -407,10 +407,8 @@ export async function getCommonGroups(req: Request, res: Response): Promise<void
   }
 
   try {
-    // Note: Baileys doesn't have a direct "get common groups" function
-    // We would need to iterate through all groups and check membership
-    logger.warn({ sessionId, contactId }, 'getCommonGroups not fully supported in Baileys');
-    sendSuccess(res, { groups: [] });
+    const groups = await sessionManager.getCommonGroups(sessionId, contactId);
+    sendSuccess(res, { groups });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Failed to get common groups';
     logger.error({ sessionId, contactId, error: errorMessage }, 'Error getting common groups');
@@ -437,7 +435,8 @@ export async function getNumberId(req: Request, res: Response): Promise<void> {
   }
 
   try {
-    const [result] = await session.socket.onWhatsApp(number);
+    const results = (await session.socket.onWhatsApp(number)) || [];
+    const [result] = results as Array<{ jid: string; exists: unknown }>;
 
     if (result?.exists) {
       sendSuccess(res, {

@@ -8,8 +8,10 @@ A lightweight WhatsApp API server using [Baileys](https://github.com/WhiskeySock
 - Full API parity with wwebjs-api (~70+ endpoints)
 - QR code and pairing code authentication
 - Webhook delivery for events
+- WebSocket event stream at `/ws` (session-filterable)
 - Multi-session support
 - Auto-reconnection with exponential backoff
+- OpenAPI + Swagger docs at `/openapi.json` and `/docs`
 
 ## Installation
 
@@ -44,6 +46,10 @@ bun run start
 ```
 
 ## API Endpoints
+
+Interactive docs:
+- `GET /docs` - Swagger UI
+- `GET /openapi.json` - OpenAPI schema
 
 ### Health Check
 - `GET /ping` - Health check
@@ -156,6 +162,23 @@ Events are delivered to `BASE_WEBHOOK_URL` with format:
 - `group_update` - Group settings changed
 - `call` - Incoming call
 
+## WebSocket Events
+
+Connect to:
+`ws://<host>:<port>/ws?apiKey=<API_KEY>&sessionId=<optionalSessionId>`
+
+- If `sessionId` is provided, only that session's events are streamed
+- If omitted, all session events are streamed
+- Message format:
+```json
+{
+  "sessionId": "session1",
+  "dataType": "message_create",
+  "data": { "...": "..." },
+  "timestamp": "2026-02-12T10:20:30.000Z"
+}
+```
+
 ## Differences from wwebjs-api
 
 ### JID Format
@@ -164,11 +187,10 @@ Events are delivered to `BASE_WEBHOOK_URL` with format:
 - The API automatically converts between formats
 
 ### Limitations
-1. **Message History**: Baileys cannot fetch historical messages like wwebjs. Only new messages after connection are available.
-2. **Contact List**: No persistent contact list - contacts discovered through messages.
+1. **Message History**: Message history is store-backed for synced and live messages. Full historical backfill beyond what the linked device syncs still depends on WhatsApp history sync.
+2. **Contact List**: Contact listing is store-backed from sync/live updates; unknown contacts are discovered progressively.
 3. **Labels**: Limited support for WhatsApp Business labels.
-4. **Starred Messages**: Starring is not fully supported.
-5. **Message Forwarding**: Requires message storage (not implemented).
+4. **Some metadata retrieval**: Certain WhatsApp internals (e.g. deep business metadata) remain protocol-limited.
 
 ### Advantages
 1. **Memory**: ~500MB less RAM per session (no Chrome/Puppeteer)

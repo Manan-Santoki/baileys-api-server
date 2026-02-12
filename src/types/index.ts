@@ -1,9 +1,12 @@
-import type { WASocket, proto, ConnectionState, AuthenticationState } from '@whiskeysockets/baileys';
+import type { WASocket, proto, WAMessageKey, makeInMemoryStore } from '@whiskeysockets/baileys';
 
 export type SessionStatus = 'connecting' | 'qr' | 'connected' | 'disconnected' | 'pairing';
 
 export interface BaileysSession {
   socket: WASocket;
+  store: ReturnType<typeof makeInMemoryStore>;
+  storePath: string;
+  messageKeyIndex: Map<string, WAMessageKey>;
   qr: string | null;
   pairingCode: string | null;
   status: SessionStatus;

@@ -3,6 +3,7 @@ import sessionManager from '../services/SessionManager';
 import messageService from '../services/MessageService';
 import logger from '../logger';
 import { sendSuccess, sendError } from '../utils/responseHelper';
+import { toBaileysJid } from '../utils/jidHelper';
 
 /**
  * Fetch messages from a chat
@@ -329,9 +330,22 @@ export async function getLabels(req: Request, res: Response): Promise<void> {
   }
 
   try {
-    // Note: Baileys has limited label support
-    logger.warn({ sessionId, chatId }, 'Chat labels not fully supported in Baileys');
-    sendSuccess(res, { labels: [] });
+    const session = sessionManager.getSession(sessionId);
+    if (!session || session.status !== 'connected') {
+      sendError(res, 'Session not connected', 400, 'session_not_connected');
+      return;
+    }
+
+    const jid = toBaileysJid(chatId);
+    const labelLinks = session.store.getChatLabels(jid);
+    const labels = labelLinks
+      .map((association) => {
+        const labelId = String((association as { labelId?: string }).labelId || '');
+        return session.store.getLabels().findById(labelId);
+      })
+      .filter(Boolean);
+
+    sendSuccess(res, { labels });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Failed to get chat labels';
     logger.error({ sessionId, chatId, error: errorMessage }, 'Error getting chat labels');

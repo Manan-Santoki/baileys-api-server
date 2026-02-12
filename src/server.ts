@@ -1,7 +1,9 @@
+import { createServer } from 'http';
 import app from './app';
 import config from './config';
 import logger from './logger';
 import sessionManager from './services/SessionManager';
+import webSocketService from './services/WebSocketService';
 
 async function main() {
   logger.info('Starting Baileys API Server...');
@@ -17,9 +19,13 @@ async function main() {
     await sessionManager.autoStartSessions();
   }
 
-  // Start HTTP server
-  app.listen(config.port, () => {
+  // Start HTTP server + websocket server
+  const server = createServer(app);
+  webSocketService.initialize(server);
+
+  server.listen(config.port, () => {
     logger.info(`Server running on http://localhost:${config.port}`);
+    logger.info(`WebSocket endpoint ws://localhost:${config.port}/ws`);
     logger.info('Available endpoints:');
     logger.info('  GET  /ping - Health check');
     logger.info('  GET  /session/start/:sessionId - Start session');
@@ -37,6 +43,7 @@ process.on('SIGINT', async () => {
   for (const sessionId of sessionIds) {
     await sessionManager.stopSession(sessionId);
   }
+  webSocketService.close();
   process.exit(0);
 });
 
@@ -46,6 +53,7 @@ process.on('SIGTERM', async () => {
   for (const sessionId of sessionIds) {
     await sessionManager.stopSession(sessionId);
   }
+  webSocketService.close();
   process.exit(0);
 });
 

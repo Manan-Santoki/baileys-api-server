@@ -1,6 +1,7 @@
 import axios from 'axios';
 import config from '../config';
 import logger from '../logger';
+import webSocketService from './WebSocketService';
 import type { WebhookPayload } from '../types';
 
 class WebhookService {
@@ -25,13 +26,16 @@ class WebhookService {
    * Send webhook to the configured URL
    */
   async send(sessionId: string, dataType: string, data: unknown): Promise<void> {
-    if (!this.baseUrl) {
-      logger.debug({ sessionId, dataType }, 'No webhook URL configured, skipping');
+    if (!this.isCallbackEnabled(dataType)) {
+      logger.debug({ sessionId, dataType }, 'Callback disabled, skipping outbound event');
       return;
     }
 
-    if (!this.isCallbackEnabled(dataType)) {
-      logger.debug({ sessionId, dataType }, 'Callback disabled, skipping webhook');
+    // Push to websocket listeners regardless of webhook configuration.
+    webSocketService.broadcast(sessionId, dataType, data);
+
+    if (!this.baseUrl) {
+      logger.debug({ sessionId, dataType }, 'No webhook URL configured, skipping HTTP webhook');
       return;
     }
 

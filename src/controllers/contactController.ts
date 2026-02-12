@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import sessionManager from '../services/SessionManager';
 import logger from '../logger';
 import { sendSuccess, sendError } from '../utils/responseHelper';
-import { toBaileysJid, toWwebjsJid, createSerializedId, getPhoneNumber } from '../utils/jidHelper';
+import { toBaileysJid, getPhoneNumber } from '../utils/jidHelper';
 
 /**
  * Get contact "about" (status)
@@ -24,7 +24,8 @@ export async function getAbout(req: Request, res: Response): Promise<void> {
 
   try {
     const jid = toBaileysJid(contactId);
-    const status = await session.socket.fetchStatus(jid);
+    const statusList = (await session.socket.fetchStatus(jid)) || [];
+    const [status] = statusList as Array<{ status?: string; setAt?: number }>;
 
     sendSuccess(res, {
       about: status?.status || null,
@@ -172,9 +173,8 @@ export async function getCommonGroups(req: Request, res: Response): Promise<void
   }
 
   try {
-    // Note: Baileys doesn't have a direct "get common groups" function
-    logger.warn({ sessionId, contactId }, 'getCommonGroups not fully supported in Baileys');
-    sendSuccess(res, { groups: [] });
+    const groups = await sessionManager.getCommonGroups(sessionId, contactId);
+    sendSuccess(res, { groups });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Failed to get common groups';
     logger.error({ sessionId, contactId, error: errorMessage }, 'Error getting common groups');
