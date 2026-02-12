@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "bun run --watch src/server.ts",
     "start": "bun run src/server.ts",
-    "build": "bun build src/server.ts --outdir dist --target node",
+    "build": "bun build src/server.ts --outdir dist --target node --packages external",
     "typecheck": "tsc --noEmit",
     "check:openapi": "node scripts/check-openapi-coverage.cjs"
   },
