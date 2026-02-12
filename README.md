@@ -149,47 +149,280 @@ Interactive docs:
 - `POST /message/pin/:sessionId` - Pin message
 - `POST /message/unpin/:sessionId` - Unpin message
 
-## Sending Messages
+## Sending Messages Guide
 
-### Text Message
+All sending uses:
+- `POST /client/sendMessage/:sessionId`
+- Header: `x-api-key: <API_KEY>` (if configured)
+- Body required keys: `chatId`, `contentType`, `content`
+
+### chatId formats you can use
+- `1234567890@c.us` (wwebjs contact format)
+- `1234567890@s.whatsapp.net` (Baileys contact format)
+- `1234567890` (server auto-converts to WhatsApp user JID)
+- `1203630XXXXXXXXX@g.us` (group JID)
+
+Use the same endpoint for personal and group chats. Group sends require the session account to be a participant and allowed to send messages in that group.
+
+### contentType support
+- `string`: plain text message
+- `MessageMedia`: base64 media payload
+- `MessageMediaFromURL`: media from public URL
+- `Location`: latitude/longitude location message
+- `Poll`: poll message
+- `Contact`: send a contact card
+- `Buttons`: fallback text rendering (interactive buttons are deprecated by WhatsApp)
+- `List`: fallback text rendering (interactive lists are deprecated by WhatsApp)
+
+### options support
+`options` is optional and currently supports:
+- `caption`: media caption
+- `quotedMessageId`: reply to an existing message id
+- `mentions`: array of user IDs to mention
+- `sendAudioAsVoice`: send audio as voice note (`ptt`)
+- `sendVideoAsGif`: send video as GIF playback
+- `linkPreview`: enable/disable text link preview generation (default: enabled)
+
+### Option applicability matrix (important)
+Not all options apply to all `contentType` values.
+
+| Option | string | MessageMedia | MessageMediaFromURL | Location | Poll | Contact | Buttons | List |
+|---|---|---|---|---|---|---|---|---|
+| `quotedMessageId` | Yes | Yes | Yes | No | No | No | No | No |
+| `mentions` | Yes | Yes | Yes | No | No | No | No | No |
+| `caption` | No | Image/Video only | Image/Video only | No | No | No | No | No |
+| `sendAudioAsVoice` | No | Audio only | Audio URL only | No | No | No | No | No |
+| `sendVideoAsGif` | No | Video only | Video URL only | No | No | No | No | No |
+| `linkPreview` | Yes | No | No | No | No | No | No | No |
+
+Implementation details:
+- `quotedMessageId` is best-effort. If message is not found in local store, send still succeeds without quote.
+- `linkPreview` only applies to text messages and only the first `http/https` URL in text is used.
+- Link preview generation has a `5s` timeout and failures are non-blocking (message is still sent).
+- `MessageMediaFromURL` first downloads media server-side (`60s` timeout), then sends it as normal media.
+- If `caption` is not provided for image/video, server falls back to `filename`, then empty string.
+- Audio/document messages ignore `caption` in current implementation.
+
+### 1) Plain text
 ```json
-POST /client/sendMessage/:sessionId
 {
   "chatId": "1234567890@c.us",
   "contentType": "string",
-  "content": "Hello World!"
+  "content": "Hello from API"
 }
 ```
 
-### Media Message
+### 2) Text with mentions + quote + link preview control
 ```json
-POST /client/sendMessage/:sessionId
+{
+  "chatId": "120363012345678901@g.us",
+  "contentType": "string",
+  "content": "Hi @user, please review this: https://example.com/spec",
+  "options": {
+    "mentions": ["1234567890@c.us"],
+    "quotedMessageId": "ABCD1234EFGH5678",
+    "linkPreview": false
+  }
+}
+```
+
+Note:
+- `quotedMessageId` should exist in local message store for that session/chat. If not found, message is still sent without quote context.
+- `mentions` accepts IDs in `@c.us`, `@s.whatsapp.net`, or numeric form.
+
+### 3) Image via base64
+```json
 {
   "chatId": "1234567890@c.us",
   "contentType": "MessageMedia",
   "content": {
-    "mimetype": "image/png",
-    "data": "base64_encoded_data",
-    "filename": "image.png"
+    "mimetype": "image/jpeg",
+    "data": "<BASE64_IMAGE>",
+    "filename": "photo.jpg"
   },
   "options": {
-    "caption": "Check this out!"
+    "caption": "Image from base64"
   }
 }
 ```
 
-### Media from URL
+### 4) Video via base64 (normal or GIF playback)
 ```json
-POST /client/sendMessage/:sessionId
 {
   "chatId": "1234567890@c.us",
-  "contentType": "MessageMediaFromURL",
-  "content": "https://example.com/image.png",
+  "contentType": "MessageMedia",
+  "content": {
+    "mimetype": "video/mp4",
+    "data": "<BASE64_VIDEO>",
+    "filename": "clip.mp4"
+  },
   "options": {
-    "caption": "From URL"
+    "caption": "Video clip",
+    "sendVideoAsGif": true
   }
 }
 ```
+
+### 5) Audio via base64 (normal audio or voice note)
+```json
+{
+  "chatId": "1234567890@c.us",
+  "contentType": "MessageMedia",
+  "content": {
+    "mimetype": "audio/ogg",
+    "data": "<BASE64_AUDIO>",
+    "filename": "note.ogg"
+  },
+  "options": {
+    "sendAudioAsVoice": true
+  }
+}
+```
+
+### 6) Document via base64
+```json
+{
+  "chatId": "1234567890@c.us",
+  "contentType": "MessageMedia",
+  "content": {
+    "mimetype": "application/pdf",
+    "data": "<BASE64_PDF>",
+    "filename": "invoice.pdf"
+  }
+}
+```
+
+### 7) Media from URL
+```json
+{
+  "chatId": "1234567890@c.us",
+  "contentType": "MessageMediaFromURL",
+  "content": "https://example.com/path/image.png",
+  "options": {
+    "caption": "Fetched from URL"
+  }
+}
+```
+
+### 8) Location message
+```json
+{
+  "chatId": "1234567890@c.us",
+  "contentType": "Location",
+  "content": {
+    "latitude": 37.7749,
+    "longitude": -122.4194,
+    "description": "San Francisco"
+  }
+}
+```
+
+### 9) Poll message
+```json
+{
+  "chatId": "120363012345678901@g.us",
+  "contentType": "Poll",
+  "content": {
+    "pollName": "Deploy window?",
+    "pollOptions": ["Now", "Tonight", "Tomorrow"],
+    "options": {
+      "allowMultipleAnswers": false
+    }
+  }
+}
+```
+
+Poll behavior:
+- `allowMultipleAnswers: false` allows one selection.
+- `allowMultipleAnswers: true` allows selecting up to all poll options.
+
+### 10) Contact card message
+```json
+{
+  "chatId": "1234567890@c.us",
+  "contentType": "Contact",
+  "content": {
+    "contactId": "19876543210@c.us"
+  }
+}
+```
+
+Contact behavior:
+- Server builds a vCard using the numeric part of `contactId`.
+- `contactId` accepts numeric, `@c.us`, or `@s.whatsapp.net` format.
+
+### 11) Buttons/List content types
+These are accepted for compatibility, but WhatsApp interactive buttons/lists are deprecated in many clients. The server sends a text fallback.
+
+Buttons example:
+```json
+{
+  "chatId": "1234567890@c.us",
+  "contentType": "Buttons",
+  "content": {
+    "title": "Actions",
+    "body": "Choose an option",
+    "footer": "Footer",
+    "buttons": [
+      { "id": "one", "body": "Option 1" },
+      { "id": "two", "body": "Option 2" }
+    ]
+  }
+}
+```
+
+Compatibility behavior:
+- `Buttons`: fallback text uses `title`, `body`, `footer`. `buttons[]` are not rendered as interactive actions.
+- `List`: fallback text uses `title`, `body`, `footer`. `buttonText` and `sections[]` are not interactive in current implementation.
+- Account requirement: normal personal WhatsApp linked-device account works; no special business API account is required.
+
+List example:
+```json
+{
+  "chatId": "1234567890@c.us",
+  "contentType": "List",
+  "content": {
+    "title": "Menu",
+    "body": "Pick one item",
+    "footer": "Footer",
+    "buttonText": "Open",
+    "sections": [
+      {
+        "title": "Main",
+        "rows": [
+          { "id": "r1", "title": "Row 1", "description": "First row" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### Base64 tips and pitfalls
+- Send raw base64 data in `content.data` (without `data:<mime>;base64,` prefix).
+- Make sure `mimetype` matches payload bytes (`image/png`, `video/mp4`, `audio/ogg`, etc.).
+- Large payloads are limited by server body size (`50mb` by default in this app).
+- For URL media, the URL must be publicly reachable by the server runtime.
+- For quoted replies, the referenced message must be available in the session store.
+
+### How to generate base64 quickly
+Linux/macOS:
+```bash
+base64 -w 0 ./photo.jpg
+```
+
+Windows PowerShell:
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes(".\photo.jpg"))
+```
+
+### Common send failures and fixes
+- `Session not connected`: start session first with `GET /session/start/:sessionId` and wait for `ready`.
+- `chatId, contentType, and content are required`: request body is missing required fields.
+- `Unsupported content type`: `contentType` must be one of the documented enum values.
+- URL media send fails: URL is not reachable from server network, times out, or blocks bot user-agent.
+- Group send fails: ensure `chatId` is correct `@g.us`, account is in group, and group allows participants to send.
+- Mention not visible: mentioned user ID must resolve to a valid WhatsApp user JID.
 
 ## Webhook Events
 
